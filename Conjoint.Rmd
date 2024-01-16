@@ -1,0 +1,416 @@
+---
+title: "Conjoint Experiment"
+author: "Xinyuan Yang"
+date: "2023-11-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)        
+library(haven)       
+library(broom)        
+library(cregg)           
+library(survey)          
+library(scales)          
+library(marginaleffects)  
+library(broom.helpers)     
+library(ggforce)         
+library(brms)             
+library(tidybayes)       
+library(patchwork) 
+library(dplyr)
+library(jtools)
+library(tictoc)
+library(cjoint)
+library(qualtRics)
+library(parameters)
+library(list)
+library(stats)
+```
+
+## Conjoint Data
+
+```{r}
+# Read In Data
+
+anti_nov <- read.qualtrics("~/Desktop/PROJECT/CSV FILES/Full Antisemitism Survey_November 7, 2023_Vladic.csv",
+    responses = c("conjoint1","conjoint2","conjoint3","conjoint4"),
+                      covariates = c('Q12'),
+                      respondentID = c(NULL), letter = "F", 
+                      new.format=TRUE, ranks = NULL) 
+```
+
+```{r}
+# Save the data frame 'mydata' to a CSV file
+write_csv(anti_nov, "~/Desktop/PROJECT/CSV FILES/anti_nov.csv")
+
+```
+
+
+```{r}
+# Clean Data 
+
+Nov_Updated <- anti_nov
+
+Nov_Updated[Nov_Updated == ""] <- NA
+
+Nov_Updated$Q12 <- as.factor(Nov_Updated$Q12)
+```
+
+```{r}
+Nov_Updated$selected <- as.numeric(Nov_Updated$selected)
+class(Nov_Updated$selected)
+```
+
+```{r}
+# Levels for Q12
+
+levels(Nov_Updated$Q12) <- c("Democrat", "Independent", "No Preference", "Other", "Republican")
+```
+
+```{r}
+# Rename to Party
+
+Nov_Updated <- Nov_Updated %>% 
+       rename("Party" = "Q12")
+```
+
+```{r}
+# Set Up Marginal Mean
+
+Nov_Updated_mm <- cj(na.omit(Nov_Updated), selected ~ Education + Race + Age + Incumbent + Veteran.status + Ideology + Message + Sex, id = ~respondent, estimate = "mm", by = ~Party)
+```
+
+```{r}
+# Select Variables We Want 
+
+Nov_levels <- c("White", "Hispanic", "Black", "Liberal", "Conservative", "We improve our economy by trading with other countries", "Violence in political discourse should not be tolerated", "Globalism is a threat to our country", "Cultural Marxism is a threat to our society", "A small cosmopolitan elite controls too much world power")
+
+Nov_subset <- subset(Nov_Updated_mm, level %in% Nov_levels)
+```
+
+```{r}
+# Select What Parties We Want
+
+party_levels <- c("Republican", "Democrat", "Independent")
+Nov_plot_updated <- subset(Nov_subset, Party%in% party_levels)
+
+```
+
+```{r}
+# By Party Plot 
+
+party_Nov_Updated <- ggplot(
+  Nov_plot_updated,  # Specify the dataset here
+  aes(x = estimate, y = level, color = Party)  # Adjusted here
+) +
+  geom_vline(xintercept = 0.5) +
+  geom_pointrange(aes(xmin = lower, xmax = upper), position = position_dodge(0.7), size = 0.3,              
+                  linetype = "solid",    
+                  alpha = 0.9) +  
+  scale_color_manual(values = c("Republican" = "firebrick1", "Democrat" = "deepskyblue1", "Independent" = "darkgoldenrod1")) +
+  labs(
+    x = "Marginal Mean by Party",
+    y = NULL
+    ) +
+  facet_col(facets = "feature", scales = "free_y", space = "free", strip.position = c("top")) +  # Adjusted here
+  theme_bw()
+
+party_Nov_Updated
+
+ggsave(filename = "party_Nov_Updated.png", width = 10, height = 7, dpi = 300)
+```
+
+
+```{r}
+Nov_Updated_mm_full <- cj(na.omit(Nov_Updated), selected ~  Education + Race + Age + Incumbent + Veteran.status + Message + Ideology + Sex, id = ~respondent, estimate = "mm")
+```
+
+```{r}
+# Full Plot 
+
+Nov_Updated_Full <- plot(Nov_Updated_mm_full, vline = 0.5, 
+     xlim = c(.3,.70))
+
+Nov_Updated_Full
+
+ggsave(filename = "Nov_Updated_Full.png", width = 10, height = 7, dpi = 300)
+
+
+```
+
+
+```{r}
+# Set Up Marginal Mean for Ideology
+
+Nov_Updated_mm_ideology <- cj(na.omit(Nov_Updated), selected ~  Education + Race + Age + Incumbent + Veteran.status + Message + Party + Sex , id = ~respondent, estimate = "mm", by = ~Ideology)
+```
+
+```{r}
+# Select Variables We Want 
+
+ideology_Nov_Updated_levels <- c("White", "Hispanic", "Black", "Republican", "Democrat", "Independent", "We improve our economy by trading with other countries", "Violence in political discourse should not be tolerated", "Globalism is a threat to our country", "Cultural Marxism is a threat to our society", "A small cosmopolitan elite controls too much world power")
+
+ideology_plot_subset <- subset(Nov_Updated_mm_ideology, level %in% ideology_Nov_Updated_levels)
+```
+
+```{r}
+# Plot Anti_Updated_Ideology
+
+Nov_Updated_Ideology <- ggplot(
+  ideology_plot_subset,  # Specify the dataset here
+  aes(x = estimate, y = level, color = Ideology)  # Adjusted here
+) +
+  geom_vline(xintercept = 0.5) +
+  geom_pointrange(aes(xmin = lower, xmax = upper), position = position_dodge(0.7), size = 0.3,              
+                  linetype = "solid",    
+                  alpha = 0.9) +  
+  scale_color_manual(values = c("Conservative" = "firebrick1", "Liberal" = "deepskyblue1", "Moderate" = "darkgoldenrod1")) +
+  labs(
+    x = "Marginal Mean by Party",
+    y = NULL
+    ) +
+  facet_col(facets = "feature", scales = "free_y", space = "free", strip.position = c("top")) +  # Adjusted here
+  theme_bw()
+
+Nov_Updated_Ideology
+
+ggsave(filename = "Nov_Updated_Ideology.png", width = 10, height = 7, dpi = 300)
+```
+
+
+```{r}
+education <- Nov_Updated %>%
+  group_by(Education) %>%
+  summarize(avg = mean(selected, na.rm=TRUE))
+education
+
+race <- Nov_Updated %>%
+  group_by(Race) %>%
+  summarize(avg = mean(selected, na.rm=TRUE))
+race
+
+age <- Nov_Updated %>%
+  group_by(Age) %>%
+  summarize(avg = mean(selected, na.rm=TRUE))
+age
+
+incumbent <- Nov_Updated %>%
+  group_by(Incumbent) %>%
+  summarize(avg = mean(selected, na.rm=TRUE))
+incumbent
+
+veteran <- Nov_Updated %>%
+  group_by(Veteran.status) %>%
+  summarize(avg = mean(selected, na.rm=TRUE))
+veteran
+
+message <- Nov_Updated %>%
+  group_by(Message) %>%
+  summarize(avg = mean(selected, na.rm=TRUE))
+message
+
+ideology <- Nov_Updated %>%
+  group_by(Ideology) %>%
+  summarize(avg = mean(selected, na.rm=TRUE))
+ideology
+
+sex <- Nov_Updated %>%
+  group_by(Sex) %>%
+  summarize(avg = mean(selected, na.rm=TRUE))
+sex
+```
+
+
+```{r}
+# Plot Frequency Full
+
+freq_plot_nov <- plot(cj_freqs(na.omit(Nov_Updated), selected ~  Education + Race + Age + Incumbent + Veteran.status + Message + Ideology + Sex, id = ~respondent))
+
+freq_plot_nov
+
+ggsave(filename = "Freq_Plot_Nov.png", width = 10, height = 7, dpi = 300)
+
+
+```
+
+
+```{r}
+test_plot_nov <- plot(Nov_plot_updated, vline = 0.5) + 
+  ggplot2::facet_wrap(~BY, ncol = 3L)
+
+test_plot_nov
+
+ggsave(filename = "Test_plot_nov.png", width = 10, height = 7, dpi = 300)
+```
+
+
+```{r}
+# Select What Parties We Want
+
+party_levels_2 <- c("Republican", "Democrat", "Independent")
+Nov_plot_updated_2 <- subset(Nov_Updated_mm, Party%in% party_levels_2)
+
+```
+
+```{r}
+test_plot_2_nov <- plot(Nov_plot_updated_2, vline = 0.5) + 
+  ggplot2::facet_wrap(~BY, ncol = 3L)
+
+test_plot_2_nov
+
+ggsave(filename = "Test_plot_2_nov.png", width = 10, height = 7, dpi = 300)
+```
+
+
+## Only Looking at Republican vs Democrat 
+
+```{r}
+# Read In Data
+
+party_nov <- read.qualtrics("~/Desktop/PROJECT/CSV FILES/Full Antisemitism Survey_November 7, 2023_Vladic.csv",
+    responses = c("conjoint1","conjoint2","conjoint3","conjoint4"),
+                      covariates = c('Updated_Party'),
+                      respondentID = c(NULL), letter = "F", 
+                      new.format=TRUE, ranks = NULL) 
+```
+
+```{r}
+# Save the data frame 'mydata' to a CSV file
+write_csv(party_nov, "~/Desktop/PROJECT/CSV FILES/party_nov.csv")
+
+```
+
+
+```{r}
+# Clean Data 
+
+Party_Updated <- party_nov
+
+Party_Updated[Party_Updated == ""] <- NA
+
+Party_Updated$Updated_Party <- as.factor(Party_Updated$Updated_Party)
+```
+
+```{r}
+Party_Updated$selected <- as.numeric(Party_Updated$selected)
+class(Party_Updated$selected)
+```
+
+```{r}
+# Levels for Updated_Party
+
+levels(Party_Updated$Updated_Party) <- c("Democrat", "Independent", "Republican")
+```
+
+```{r}
+# Set Up Marginal Mean
+
+Party_Updated_mm <- cj(na.omit(Party_Updated), selected ~ Education + Race + Age + Incumbent + Veteran.status + Ideology + Message + Sex, id = ~respondent, estimate = "mm", by = ~Updated_Party)
+```
+
+```{r}
+# Select Variables We Want 
+
+Party_levels <- c("White", "Hispanic", "Black", "Liberal", "Conservative", "We improve our economy by trading with other countries", "Violence in political discourse should not be tolerated", "Globalism is a threat to our country", "Cultural Marxism is a threat to our society", "A small cosmopolitan elite controls too much world power")
+
+Party_subset <- subset(Party_Updated_mm, level %in% Nov_levels)
+```
+
+```{r}
+# Select What Political Parties We Want
+
+political_levels <- c("Republican", "Democrat")
+Party_plot_updated <- subset(Party_subset, Updated_Party%in% political_levels)
+
+```
+
+```{r}
+# By Party Plot with Just Democrat vs Republican
+
+Political_Party_Updated <- ggplot(
+  Party_plot_updated,  # Specify the dataset here
+  aes(x = estimate, y = level, color = Updated_Party)  # Adjusted here
+) +
+  geom_vline(xintercept = 0.5) +
+  geom_pointrange(aes(xmin = lower, xmax = upper), position = position_dodge(0.7), size = 0.3,              
+                  linetype = "solid",    
+                  alpha = 0.9) +  
+  scale_color_manual(values = c("Republican" = "firebrick1", "Democrat" = "deepskyblue1")) +
+  labs(
+    x = "Marginal Mean by Political Party",
+    y = NULL
+    ) +
+  facet_col(facets = "feature", scales = "free_y", space = "free", strip.position = c("top")) +  # Adjusted here
+  theme_bw()
+
+Political_Party_Updated
+
+ggsave(filename = "Political_Party_Updated.png", width = 10, height = 7, dpi = 300)
+```
+
+```{r}
+count <- table(Party_Updated$Updated_Party)
+count
+```
+
+```{r}
+# Select What Parties We Want
+
+political_party_levels_new <- c("Republican", "Democrat")
+party_plot_updated_2 <- subset(Party_Updated_mm, Updated_Party%in% political_party_levels_new)
+
+```
+
+```{r}
+test_plot_political <- plot(party_plot_updated_2, vline = 0.5) + 
+  ggplot2::facet_wrap(~BY, ncol = 3L)
+
+test_plot_political
+
+ggsave(filename = "test_plot_political.png", width = 10, height = 7, dpi = 300)
+```
+
+
+## Requested Conjoint Plots 
+
+```{r}
+# Party Plot 
+
+MM_Party_Updated <- plot(Nov_plot_updated, group = "Party", vline = 0.5, xlim = c(.2, .8)) +
+  scale_color_manual(values = c("Republican" = "firebrick1", "Democrat" = "deepskyblue1", "Independent" = "chartreuse3")) +
+  theme(
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 14),
+    strip.text = element_text(size = 16)
+  )
+
+MM_Party_Updated
+
+ggsave("MM_Party_Updated.png", MM_Party_Updated, width = 10, height = 8, units = "in")
+```
+
+```{r}
+# Updated_Party Plot 
+
+MM_Updated_Party_Updated <- plot(Party_plot_updated, group = "Updated_Party", vline = 0.5, xlim = c(.2, .8)) +
+  scale_color_manual(values = c("Republican" = "firebrick1", "Democrat" = "deepskyblue1", "Independent" = "chartreuse3")) +
+  theme(
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 14),
+    strip.text = element_text(size = 16)
+  )
+
+MM_Updated_Party_Updated
+
+ggsave("MM_Updated_Party_Updated.png", MM_Updated_Party_Updated, width = 10, height = 8, units = "in")
+```
+
+
+
+

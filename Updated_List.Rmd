@@ -1,0 +1,350 @@
+---
+title: "List Experiment"
+author: "Xinyuan Yang"
+date: "2023-11-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)        
+library(survey)          
+library(scales)          
+library(dplyr)
+library(qualtRics)
+library(list)
+library(stats)
+library(plotly)
+library(ggplot2)
+library(RColorBrewer)
+```
+
+## List Experiment 
+
+```{r}
+# Read in Data 
+
+survey_file <- "~/Desktop/PROJECT/CSV FILES/Full Antisemitism Survey_November 7, 2023.csv"
+col_names <- names(read_csv(survey_file,
+                            n_max = 0,
+                            show_col_types = FALSE))
+
+list_nov <- read_csv(survey_file,
+                      col_names = col_names, 
+                      skip = 3,
+                      show_col_types = FALSE)
+```
+
+```{r}
+# Clean Data 
+
+List_Nov_Updated <-list_nov
+
+List_Nov_Updated[List_Nov_Updated == ""] <- NA
+
+List_Nov_Updated$Q12 <- as.factor(List_Nov_Updated$Q12)
+
+List_Nov_Updated$Updated_Party <- as.factor(List_Nov_Updated$Updated_Party)
+```
+
+```{r}
+# Levels for Q12
+
+levels(List_Nov_Updated$Q12) <- c("Democrat", "Independent", "No Preference", "Other", "Republican")
+
+# Rename to Party
+
+List_Nov_Updated <- List_Nov_Updated %>% 
+  rename("Party" = "Q12")
+```
+
+```{r}
+# Levels for Updated_Party
+
+levels(List_Nov_Updated$Updated_Party) <- c("Democrat", "Independent", "Republican")
+```
+
+```{r}
+List_Nov_Updated <- List_Nov_Updated %>%
+  mutate(
+    treatment = ifelse(!is.na(Q38), 1, 0), # Creates treatment variable
+    response = coalesce(Q38, Q37) # Creates a single count variable
+  )
+```
+
+```{r}
+# Save the data frame 'mydata' to a CSV file
+write_csv(List_Nov_Updated, "~/Desktop/PROJECT/CSV FILES/List_Nov_Updated.csv")
+
+```
+
+```{r}
+List_Nov_Updated <- List_Nov_Updated %>%
+  filter(!is.na(response))
+```
+
+```{r}
+List_Nov_Updated$treatment <- factor(List_Nov_Updated$treatment, 
+                                      levels = c(0, 1), 
+                                      labels = c("control", "treatment"))
+
+List_Nov_Updated <- List_Nov_Updated %>%
+  mutate(response = as.numeric(gsub("\\s\\(.*\\)", "", response)))
+
+table(List_Nov_Updated$response)
+table(List_Nov_Updated$treatment)
+```
+
+```{r}
+List_result <- ictreg(response ~ 1, data = as.data.frame(List_Nov_Updated), treat = "treatment", J = 3, method = "ml")
+List_result
+
+summary(List_result)
+
+table(List_Nov_Updated$treatment, List_Nov_Updated$response)
+```
+
+```{r}
+sensitive_probability = exp(-1.8324988) / (1 + exp(-1.8324988))
+control_probability = exp(0.6933931) / (1 + exp(0.6933931))
+
+sensitive_probability
+control_probability
+```
+
+```{r}
+# Given probabilities from previous calculations
+sensitive_probability <- 0.1379409
+control_probability <- 0.6667213
+
+# Assuming you have the number of individuals in the treatment group
+num_individuals_treatment <- nrow(subset(List_Nov_Updated, treatment == 'treatment'))
+
+# Calculate the difference in the average number of "yes" responses 
+sensitive_probability
+
+# Estimate the number of individuals in the treatment group who selected the sensitive question
+estimated_num_yes_sensitive <- 
+  sensitive_probability * num_individuals_treatment
+estimated_num_yes_sensitive
+
+total_respondents <- 1025
+estimated_proportion <- estimated_num_yes_sensitive / total_respondents
+estimated_proportion
+```
+
+```{r}
+estimated_num_yes_sensitive
+estimated_proportion*100
+```
+
+
+## Plots
+
+```{r}
+# Reorder based on the frequency of responses
+List_Nov_Updated$response <- factor(List_Nov_Updated$response, levels = names(sort(table(List_Nov_Updated$response), decreasing = FALSE)))
+
+# Plotting
+NOV_response_plot <- ggplot(List_Nov_Updated, aes(y = response, fill = treatment)) + 
+  geom_bar(position="dodge", stat="count", aes(x=..count..), color="black", width=0.6) +
+  geom_text(stat='count', aes(label=..count.., x=..count.. + 12), position=position_dodge(width=0.7), size=2.5, color="black", hjust=1, fontface="bold") +
+  scale_fill_manual(values=c("#66c2a5", "#AED6F1"), name="Treatment") +  # Custom color palette
+  labs(title="Distribution of Agreed Questions by Treatment Group",
+       x="Count",
+       y="Number of Agreed Questions",
+       fill="Treatment",
+       caption="*Respondents in the control group were presented with 3 questions, while the treatment group was presented 4 questions.\n**If all 4 questions were agreed, we can conclude those respondents agreed with the sensitive question.\n***These counts represent the actual responses of the survey respondents and do not take in account any estimation") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size=12),
+        axis.text.x = element_text(size=10),
+        panel.grid.major.x = element_line(colour = "gray90"),
+        panel.grid.minor.x = element_blank(),
+        legend.position = "top",
+        legend.title = element_text(size=14, face="bold"),
+        legend.text = element_text(size=12),
+        plot.title = element_text(size=16, hjust = 0.5),
+        plot.margin = margin(10, 10, 10, 10), 
+        plot.caption = element_text(hjust = 0, face="italic"))
+
+NOV_response_plot
+
+ggsave("NOV_Response_Plot.jpg", NOV_response_plot, width = 8, height = 6, dpi = 300)
+
+```
+
+
+```{r}
+actual_yes <- 23 
+actual_no <- total_respondents - actual_yes
+
+# Calculate estimated number of "no" responses
+estimated_num_no_sensitive <- total_respondents - estimated_num_yes_sensitive
+
+# Create data for plotting
+data <- data.frame(
+  Type = rep(c("Estimated", "Actual"), each = 2),
+  Response = c("Yes", "No", "Yes", "No"),
+  Count = c(estimated_num_yes_sensitive, estimated_num_no_sensitive, actual_yes, actual_no)
+)
+
+# Create the grouped bar chart
+NOV_estimate_plot <- ggplot(data, aes(x = Response, y = Count, fill = Type)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  geom_text(aes(label = sprintf("%.0f", Count), y = Count), position = position_dodge(width = 0.9), vjust = -0.5) +
+  labs(title = "Comparison of Estimated vs Actual Responses",
+       y = "Number of Respondents", caption="*No means the respondent did not select the sensitive question.\n**Yes means the respondent did select the sensitive question.\n***The estimated numbers are just an estimation, the only numbers that are proven are the actual numbers.") +
+  scale_fill_manual(values = c("Estimated" = "darkseagreen", "Actual" = "darkorchid")) + # Adjust colors as needed
+  theme_minimal() +
+  theme(axis.text.y = element_text(size=12),
+        axis.text.x = element_text(size=10),
+        panel.grid.major.x = element_line(colour = "gray90"),
+        panel.grid.minor.x = element_blank(),
+        legend.position = "top",
+        legend.title = element_text(size=14, face="bold"),
+        legend.text = element_text(size=12),
+        plot.title = element_text(size=16, hjust = 0.5),
+        plot.margin = margin(10, 10, 10, 10), 
+        plot.caption = element_text(hjust = 0, face="italic"))
+
+NOV_estimate_plot
+
+ggsave("NOV_Estimate_Plot.jpg", NOV_estimate_plot, width = 8, height = 6, dpi = 300)
+```
+
+
+## By Party
+
+```{r}
+Dems<-subset(List_Nov_Updated, Party == "Democrat")
+Reps<-subset(List_Nov_Updated, Party == "Republican")
+Inds<-subset(List_Nov_Updated, Party == "Independent")
+No_Pref<-subset(List_Nov_Updated, Party == "No Preference")
+Other<-subset(List_Nov_Updated, Party == "Other")
+```
+
+```{r}
+data_list <- list(Dems = Dems, Reps = Reps, Inds = Inds, No_Pref = No_Pref, Other = Other)
+
+models_list <- lapply(data_list, function(data) {
+  ictreg(formula = response ~ 1, data = as.data.frame(data), treat = "treatment", J = 3, method = "ml")
+})
+
+lapply(models_list, summary)
+```
+
+```{r}
+prob_dems <- exp(-1.99395) / (1 + exp(-1.99395))
+prob_reps <- exp(-2.13639) / (1 + exp(-2.13639))
+prob_inds <- exp(-1.3083) / (1 + exp(-1.3083))
+prob_no_pref <- exp(-19.17252) / (1 + exp(-19.17252))
+prob_other <- exp(-18.40278) / (1 + exp(-18.40278))
+
+cat("Democrats: ", prob_dems, "\n")
+cat("Republicans: ", prob_reps, "\n")
+cat("Independents: ", prob_inds, "\n")
+cat("No Preference: ", prob_no_pref, "\n")
+cat("Other: ", prob_other, "\n")
+```
+
+```{r}
+party_data <- data.frame(
+  Party = c("Democrat", "Republican", "Independent", "No Preference", "Other"),
+  Probability = c(prob_dems, prob_reps, prob_inds, prob_no_pref, prob_other)
+)
+
+print(party_data)
+```
+
+```{r}
+party_data$Party <- factor(party_data$Party, levels = party_data$Party[order(-party_data$Probability)])
+
+NOV_party_estimate <- ggplot(party_data, aes(x = reorder(Party, -Probability), y = Probability*100)) +
+  geom_bar(stat = "identity", fill = "darkslategrey") +
+  geom_text(aes(label = sprintf("%.0f%%", Probability*100)), vjust = -0.5) +
+  labs(title = "Probability of Selecting the Sensitive Question by Party",
+       y = "Probability", x = "Political Affiliation", caption="*These percentages are just estimations, not absolute truths") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size=12),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid.major.x = element_line(colour = "gray90"),
+        panel.grid.minor.x = element_blank(),
+        legend.position = "top",
+        legend.title = element_text(size=14, face="bold"),
+        legend.text = element_text(size=12),
+        plot.title = element_text(size=16, hjust = 0.5),
+        plot.margin = margin(10, 10, 10, 10), 
+        plot.caption = element_text(hjust = 0, face="italic"))
+
+NOV_party_estimate
+
+ggsave("NOV_Party_Estimate.jpg", NOV_party_estimate, width = 8, height = 6, dpi = 300)
+```
+
+## By Updated Party 
+
+```{r}
+Dems_2<-subset(List_Nov_Updated, Updated_Party == "Democrat")
+Reps_2<-subset(List_Nov_Updated, Updated_Party == "Republican")
+Inds_2<-subset(List_Nov_Updated, Updated_Party == "Independent")
+```
+
+```{r}
+data_list_2 <- list(Dems_2 = Dems_2, Reps_2 = Reps_2, Inds_2 = Inds_2)
+
+models_list_2 <- lapply(data_list_2, function(data) {
+  ictreg(formula = response ~ 1, data = as.data.frame(data), treat = "treatment", J = 3, method = "ml")
+})
+
+lapply(models_list_2, summary)
+```
+
+```{r}
+prob_dems_2 <- exp(-1.86652) / (1 + exp(-1.86652))
+prob_reps_2 <- exp(-1.79428) / (1 + exp(-1.79428))
+prob_inds_2 <- exp(-16.8047) / (1 + exp(-16.8047))
+
+cat("Democrats: ", prob_dems_2, "\n")
+cat("Republicans: ", prob_reps_2, "\n")
+cat("Independents: ", prob_inds_2, "\n")
+```
+
+```{r}
+party_data_2 <- data.frame(
+  Party = c("Democrat", "Republican", "Independent"),
+  Probability = c(prob_dems_2, prob_reps_2, prob_inds_2)
+)
+
+print(party_data_2)
+```
+
+```{r}
+party_data_2$Party <- factor(party_data_2$Party, levels = party_data_2$Party[order(-party_data_2$Probability)])
+
+NOV_party_estimate_2 <- ggplot(party_data_2, aes(x = reorder(Party, -Probability), y = Probability*100)) +
+  geom_bar(stat = "identity", fill = "cornflowerblue") +
+  geom_text(aes(label = sprintf("%.0f%%", Probability*100)), vjust = -0.5) +
+  labs(title = "Probability of Selecting the Sensitive Question by Party",
+       y = "Probability", x = "Political Affiliation", caption="*These percentages are just estimations, not absolute truths") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size=12),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid.major.x = element_line(colour = "gray90"),
+        panel.grid.minor.x = element_blank(),
+        legend.position = "top",
+        legend.title = element_text(size=14, face="bold"),
+        legend.text = element_text(size=12),
+        plot.title = element_text(size=16, hjust = 0.5),
+        plot.margin = margin(10, 10, 10, 10), 
+        plot.caption = element_text(hjust = 0, face="italic"))
+
+NOV_party_estimate_2
+
+ggsave("NOV_Party_Estimate_2.jpg", NOV_party_estimate_2, width = 8, height = 6, dpi = 300)
+```
+
+
